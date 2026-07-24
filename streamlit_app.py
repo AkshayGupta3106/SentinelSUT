@@ -10,6 +10,9 @@ Run:
 
 import streamlit as st
 
+if not hasattr(st, "rerun"):
+    st.rerun = st.experimental_rerun
+
 from sentinel.collector.instrument import instrument_sut
 instrument_sut()  # must run before run_pipeline is ever called
 
@@ -70,6 +73,15 @@ with tab_chat:
                     answer = result["answer"]
                     st.markdown(answer)
 
+                    # Ensure all async trace events are written, sync to DB, and update metrics
+                    from sentinel.collector.event_collector import get_collector
+                    from sentinel.trace.trace_assembler import sync_events_to_db
+                    from sentinel.metrics.metrics_collector import MetricsCollector
+
+                    get_collector().flush()
+                    sync_events_to_db()
+                    MetricsCollector().compute_and_store()
+
                     eval_results = EvaluationEngine().evaluate(
                         result["trace_id"], query, result["context"], answer
                     )
@@ -102,19 +114,43 @@ with tab_chat:
                     st.error(f"Pipeline error: {e}")
 
 with tab_dashboard:
-    render_dashboard()
+    try:
+        render_dashboard()
+    except Exception as e:
+        st.error(f"Failed to render dashboard: {e}")
+        st.exception(e)
 
 with tab_metrics:
-    render_metrics()
+    try:
+        render_metrics()
+    except Exception as e:
+        st.error(f"Failed to render metrics: {e}")
+        st.exception(e)
 
 with tab_eval:
-    render_evaluation()
+    try:
+        render_evaluation()
+    except Exception as e:
+        st.error(f"Failed to render evaluation: {e}")
+        st.exception(e)
 
 with tab_regression:
-    render_regression()
+    try:
+        render_regression()
+    except Exception as e:
+        st.error(f"Failed to render regression: {e}")
+        st.exception(e)
 
 with tab_rca:
-    render_rca()
+    try:
+        render_rca()
+    except Exception as e:
+        st.error(f"Failed to render RCA: {e}")
+        st.exception(e)
 
 with tab_reports:
-    render_reports()
+    try:
+        render_reports()
+    except Exception as e:
+        st.error(f"Failed to render reports: {e}")
+        st.exception(e)

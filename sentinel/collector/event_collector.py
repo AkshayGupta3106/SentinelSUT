@@ -26,6 +26,7 @@ from functools import wraps
 
 from .schema import StageEvent
 from ..context import trace_id_var, query_id_var
+from ..config import EVENTS_PATH
 
 _PRIMITIVE_TYPES = (str, int, float, bool, list, tuple, dict, type(None))
 
@@ -65,7 +66,7 @@ def _relevant_args(args, kwargs) -> list:
 
 
 class EventCollector:
-    def __init__(self, output_path: str = "sentinel_events.jsonl", flush_interval: float = 0.5):
+    def __init__(self, output_path: str = EVENTS_PATH, flush_interval: float = 0.5):
         self._queue: "queue.Queue[StageEvent]" = queue.Queue()
         self._output_path = output_path
         self._flush_interval = flush_interval
@@ -80,15 +81,25 @@ class EventCollector:
         with self._lock:
             self._buffer.append(event)
 
+    def flush(self) -> None:
+        """
+        Synchronously block until all pending events in the queue are written to the file.
+        """
+        self._queue.join()
+
     def _writer_loop(self) -> None:
         with open(self._output_path, "a", encoding="utf-8") as f:
             while not self._stop_event.is_set():
                 try:
                     event = self._queue.get(timeout=self._flush_interval)
-                    f.write(event.model_dump_json() + "\n")
-                    f.flush()
                 except queue.Empty:
                     continue
+
+                try:
+                    f.write(event.model_dump_json() + "\n")
+                    f.flush()
+                finally:
+                    self._queue.task_done()
 
     def get_events(self, trace_id: str | None = None) -> list[StageEvent]:
         with self._lock:

@@ -17,8 +17,7 @@ import altair as alt
 import streamlit as st
 
 from .trace.trace_assembler import sync_events_to_db
-
-EVENTS_PATH = os.path.join(os.path.dirname(__file__), "..", "sentinel_events.jsonl")
+from .config import EVENTS_PATH
 
 
 def load_events() -> pd.DataFrame:

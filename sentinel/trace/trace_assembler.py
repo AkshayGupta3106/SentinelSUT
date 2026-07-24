@@ -16,8 +16,7 @@ from datetime import datetime
 
 from .models import Trace, TraceEvent
 from .db import get_session, init_db
-
-EVENTS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "sentinel_events.jsonl")
+from ..config import EVENTS_PATH
 
 
 def _load_raw_events(path: str = EVENTS_PATH) -> list[dict]:
