@@ -15,18 +15,33 @@ import json
 import os
 
 from google import genai
+from groq import Groq
 
+USE_GROQ = os.getenv("USE_GROQ", "false").lower() in ("true", "1", "yes")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-JUDGE_MODEL = os.getenv("SENTINEL_JUDGE_MODEL", "gemini-3.5-flash")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-_client = None
+if USE_GROQ:
+    JUDGE_MODEL = os.getenv("SENTINEL_JUDGE_MODEL", "llama-3.3-70b-versatile")
+else:
+    JUDGE_MODEL = os.getenv("SENTINEL_JUDGE_MODEL", "gemini-2.5-flash")
+
+_gemini_client = None
+_groq_client = None
 
 
-def _get_client():
-    global _client
-    if _client is None:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
-    return _client
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    return _gemini_client
+
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
 
 
 FAITHFULNESS_PROMPT = """You are a strict evaluator judging whether an AI \
@@ -53,29 +68,61 @@ addresses it).
 Respond ONLY with JSON, no other text: {{"score": <float 0-1>, "reasoning": "<one sentence>"}}"""
 
 
-def _run_judge(prompt: str) -> dict:
+def _call_gemini_judge(prompt: str) -> dict:
     if not GEMINI_API_KEY:
-        return {
-            "score": None,
-            "reasoning": "[FALLBACK: NO GEMINI_API_KEY SET] judge skipped",
-            "skipped": True,
-        }
+        raise ValueError("GEMINI_API_KEY not configured")
+    client = _get_gemini_client()
+    model = JUDGE_MODEL if "gemini" in JUDGE_MODEL else "gemini-2.5-flash"
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config={"response_mime_type": "application/json"},
+    )
+    parsed = json.loads(response.text)
+    return {
+        "score": float(parsed["score"]),
+        "reasoning": parsed.get("reasoning", ""),
+        "skipped": False,
+    }
 
-    try:
-        client = _get_client()
-        response = client.models.generate_content(
-            model=JUDGE_MODEL,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-        parsed = json.loads(response.text)
-        return {
-            "score": float(parsed["score"]),
-            "reasoning": parsed.get("reasoning", ""),
-            "skipped": False,
-        }
-    except Exception as e:
-        return {"score": None, "reasoning": f"[JUDGE ERROR] {e}", "skipped": True}
+
+def _call_groq_judge(prompt: str) -> dict:
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY not configured")
+    client = _get_groq_client()
+    model = JUDGE_MODEL if ("llama" in JUDGE_MODEL or "mixtral" in JUDGE_MODEL or "gemma" in JUDGE_MODEL) else "llama-3.3-70b-versatile"
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    )
+    parsed = json.loads(response.choices[0].message.content)
+    return {
+        "score": float(parsed["score"]),
+        "reasoning": parsed.get("reasoning", ""),
+        "skipped": False,
+    }
+
+
+def _run_judge(prompt: str) -> dict:
+    attempts = []
+    if USE_GROQ:
+        attempts = [("Groq", _call_groq_judge), ("Gemini", _call_gemini_judge)]
+    else:
+        attempts = [("Gemini", _call_gemini_judge), ("Groq", _call_groq_judge)]
+
+    errors = []
+    for provider, func in attempts:
+        try:
+            return func(prompt)
+        except Exception as e:
+            errors.append(f"{provider}: {e}")
+
+    return {
+        "score": None,
+        "reasoning": f"[JUDGE ERROR] All providers failed. Errors: {'; '.join(errors)}",
+        "skipped": True,
+    }
 
 
 def judge_faithfulness(context: str, answer: str) -> dict:

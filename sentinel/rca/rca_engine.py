@@ -16,13 +16,17 @@ from datetime import datetime
 
 from sqlalchemy import select
 from google import genai
+from groq import Groq
 
 from ..trace.db import get_session, init_db
 from ..regression.models import Regression
 from .models import RCAReport
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
 _client = None
+_groq_client = None
 
 
 def _get_client():
@@ -32,25 +36,53 @@ def _get_client():
     return _client
 
 
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=GROQ_API_KEY)
+    return _groq_client
+
+
 def _polish_with_llm(rule_based_summary: str) -> str:
-    if not GEMINI_API_KEY:
-        return rule_based_summary + " [LLM polish skipped: no GEMINI_API_KEY set]"
-    try:
-        client = _get_client()
-        prompt = (
-            "Rewrite the following root-cause-analysis finding as exactly 2-3 "
-            "clear, plain-English sentences for an on-call engineer. Do not "
-            "change its meaning or add any new claims.\n\n"
-            "Output ONLY the rewritten sentences as plain text. Do not offer "
-            "multiple options, do not write 'Option 1' / 'Option 2', do not "
-            "add headers, markdown, or any explanation of what you did -- "
-            "just the final rewritten text itself, nothing else.\n\n"
-            f"Finding:\n{rule_based_summary}"
-        )
-        response = client.models.generate_content(model="gemini-3.5-flash", contents=prompt)
-        return response.text.strip()
-    except Exception as e:
-        return rule_based_summary + f" [LLM polish failed: {e}]"
+    prompt = (
+        "Rewrite the following root-cause-analysis finding as exactly 2-3 "
+        "clear, plain-English sentences for an on-call engineer. Do not "
+        "change its meaning or add any new claims.\n\n"
+        "Output ONLY the rewritten sentences as plain text. Do not offer "
+        "multiple options, do not write 'Option 1' / 'Option 2', do not "
+        "add headers, markdown, or any explanation of what you did -- "
+        "just the final rewritten text itself, nothing else.\n\n"
+        f"Finding:\n{rule_based_summary}"
+    )
+
+    gemini_err = None
+    if GEMINI_API_KEY:
+        try:
+            client = _get_client()
+            model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            response = client.models.generate_content(model=model_name, contents=prompt)
+            return response.text.strip()
+        except Exception as e:
+            gemini_err = e
+            print(f"[RCA LLM Fallback] Gemini failed: {e}. Trying Groq...")
+
+    if GROQ_API_KEY:
+        try:
+            groq_client = _get_groq_client()
+            model_name = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            response = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as groq_err:
+            if gemini_err:
+                return rule_based_summary + f" [LLM polish failed: Gemini error: {gemini_err}; Groq error: {groq_err}]"
+            return rule_based_summary + f" [LLM polish failed: Groq error: {groq_err}]"
+
+    if gemini_err:
+        return rule_based_summary + f" [LLM polish failed: Gemini error: {gemini_err}]"
+    return rule_based_summary + " [LLM polish skipped: no API keys configured]"
 
 
 class RCAEngine:

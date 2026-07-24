@@ -6,7 +6,11 @@ Run:
     python -m sentinel.trace.sync
 """
 
+import sys
 from sqlalchemy import select
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from .db import get_session, init_db
 from .models import Trace, TraceEvent

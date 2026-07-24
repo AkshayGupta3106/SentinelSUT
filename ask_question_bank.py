@@ -18,8 +18,12 @@ Run:
 """
 
 import argparse
+import sys
 import time
 from collections import defaultdict
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from sentinel.collector.instrument import instrument_sut
 instrument_sut()
