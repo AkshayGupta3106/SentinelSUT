@@ -217,14 +217,3 @@ sentinel_sut_chatbot/
 - No `.pbix` file — export layer + guide only
 - Discord alerting verified against real HTTP errors, not a confirmed successful send (no real webhook was available during development)
 
----
-
-## What's next
-
-Section 12 (productionization): a pytest suite, GitHub Actions CI, Docker/docker-compose, and a written case study walking through the real injected-regression incident end to end — detection → diagnosis → what the fix would be.
-
----
-
-## License
-
-MIT — take it, break it, learn from it.
